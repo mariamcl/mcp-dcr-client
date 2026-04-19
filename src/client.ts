@@ -1,3 +1,6 @@
+import { Client as SDKClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { discover, type OAuthEndpoints } from './discovery.js';
 import { runOAuthFlow } from './oauth.js';
 import {
@@ -27,7 +30,8 @@ export class Client {
     private readonly endpoints: OAuthEndpoints,
     private readonly creds: StoredCreds,
     private readonly configDir: string,
-    private accessToken: string,
+    /* c8 ignore next -- mutated directly by refresh-on-401 test */
+    public accessToken: string,
   ) {}
 
   static async connect(serverUrl: string, opts: ClientOptions = {}): Promise<Client> {
@@ -95,39 +99,78 @@ export class Client {
     return { creds, accessToken: result.tokens.accessToken };
   }
 
+  /**
+   * Build a fetch wrapper that injects Authorization and refreshes on 401.
+   */
+  private makeAuthFetch(): (url: URL | RequestInfo, init?: RequestInit) => Promise<Response> {
+    return async (url: URL | RequestInfo, init?: RequestInit) => {
+      const withAuth = (token: string): RequestInit => ({
+        ...init,
+        headers: {
+          ...(init?.headers instanceof Headers
+            ? Object.fromEntries((init.headers as Headers).entries())
+            : (init?.headers as Record<string, string> | undefined) ?? {}),
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      let res = await fetch(url, withAuth(this.accessToken));
+      if (res.status === 401) {
+        this.accessToken = await getValidAccessToken(this.serverUrl, this.endpoints, this.configDir);
+        res = await fetch(url, withAuth(this.accessToken));
+      }
+      return res;
+    };
+  }
+
+  /**
+   * Connect to the MCP server using the SDK transport and run `fn` with the connected client.
+   * Tears down the transport after `fn` completes.
+   */
+  private async withSDKClient<T>(fn: (sdk: SDKClient) => Promise<T>): Promise<T> {
+    const url = new URL(this.serverUrl);
+    const useSSE = url.pathname.endsWith('/sse');
+    const authFetch = this.makeAuthFetch();
+
+    const transport = useSSE
+      ? new SSEClientTransport(url, { fetch: authFetch })
+      : new StreamableHTTPClientTransport(url, { fetch: authFetch });
+
+    const sdk = new SDKClient({ name: 'mcp-dcr-client', version: '0.1.0' });
+    try {
+      await sdk.connect(transport);
+      return await fn(sdk);
+    } finally {
+      await sdk.close();
+    }
+  }
+
   async listTools(): Promise<ToolDescriptor[]> {
-    const result = await this.rpc('tools/list', {});
-    return (result as { tools: ToolDescriptor[] }).tools;
+    try {
+      const result = await this.withSDKClient((sdk) => sdk.listTools());
+      return result.tools as ToolDescriptor[];
+    } catch (e) {
+      throw toMCPRequestFailed(e);
+    }
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<string> {
-    const result = await this.rpc('tools/call', { name, arguments: args });
-    const content = (result as { content: Array<{ type: string; text?: string }> }).content;
-    return content.map((c) => c.text ?? '').join('');
-  }
-
-  private async rpc(method: string, params: unknown): Promise<unknown> {
-    const doRequest = async (token: string) => {
-      return fetch(this.serverUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      });
-    };
-
-    let res = await doRequest(this.accessToken);
-    if (res.status === 401) {
-      this.accessToken = await getValidAccessToken(this.serverUrl, this.endpoints, this.configDir);
-      res = await doRequest(this.accessToken);
+    try {
+      const result = await this.withSDKClient((sdk) =>
+        sdk.callTool({ name, arguments: args }),
+      );
+      const content = (result as { content: Array<{ type: string; text?: string }> }).content;
+      return content.map((c) => c.text ?? '').join('');
+    } catch (e) {
+      throw toMCPRequestFailed(e);
     }
-    const text = await res.text();
-    if (!res.ok) throw new MCPRequestFailed(res.status, text);
-    const parsed = JSON.parse(text) as { result?: unknown; error?: { message: string } };
-    if (parsed.error) throw new MCPRequestFailed(res.status, parsed.error.message);
-    return parsed.result;
   }
+}
+
+function toMCPRequestFailed(e: unknown): unknown {
+  if (e instanceof MCPRequestFailed) return e;
+  if (e instanceof Error) {
+    return new MCPRequestFailed(0, e.message);
+  }
+  return new MCPRequestFailed(0, String(e));
 }

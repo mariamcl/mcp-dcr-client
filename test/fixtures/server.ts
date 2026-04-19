@@ -277,7 +277,7 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
     }
     if (method === 'tools/list') {
       const toolsList = mode === 'tools_no_description'
-        ? [{ name: 'nodesc' }] // tool without description field
+        ? [{ name: 'nodesc', inputSchema: { type: 'object' } }] // tool without description field
         : [
             {
               name: 'echo',
