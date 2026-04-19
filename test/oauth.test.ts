@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { generateCodeVerifier, generateCodeChallenge, generateState, startCallbackServer } from '../src/oauth.js';
 import { createHash } from 'node:crypto';
+import { runOAuthFlow } from '../src/oauth.js';
+import { register } from '../src/registration.js';
+import { discover } from '../src/discovery.js';
+import { TokenExchangeFailed } from '../src/errors.js';
+import { inject } from 'vitest';
 
 describe('PKCE + state primitives', () => {
   it('generateCodeVerifier returns 43-128 chars of base64url', () => {
@@ -89,5 +94,57 @@ describe('startCallbackServer', () => {
     } finally {
       await close();
     }
+  });
+});
+
+const baseUrl = inject('fixtureBaseUrl');
+
+describe('runOAuthFlow', () => {
+  it('completes the full PKCE flow against the fixture server', async () => {
+    const endpoints = await discover(`${baseUrl}/mcp`);
+
+    // Custom browserOpener that just GETs the URL with redirect:manual and
+    // follows the 302 to the loopback
+    const opener = async (url: string) => {
+      const res = await fetch(url, { redirect: 'manual' });
+      const loc = res.headers.get('location');
+      if (!loc) throw new Error(`expected 302 from authorize, got ${res.status}`);
+      await fetch(loc);
+    };
+
+    const result = await runOAuthFlow({
+      endpoints,
+      clientId: 'placeholder',
+      resource: `${baseUrl}/mcp`,
+      browserOpener: opener,
+      registerDynamicRedirect: true,
+    });
+
+    expect(result.tokens.accessToken).toMatch(/^at-/);
+    expect(result.tokens.refreshToken).toMatch(/^rt-/);
+    expect(result.tokens.expiresIn).toBe(3600);
+    expect(result.clientId).toMatch(/^dyn-/);
+  });
+
+  it('throws when the AS rejects the authorize request', async () => {
+    const endpoints = await discover(`${baseUrl}/mcp`);
+    // Use a random unregistered client_id to provoke rejection;
+    // opener won't follow because there's no 302 (the AS returns 400)
+    const opener = async (url: string) => {
+      const res = await fetch(url, { redirect: 'manual' });
+      // Don't follow anything; the loopback never gets a callback
+      void res;
+    };
+
+    await expect(
+      runOAuthFlow({
+        endpoints,
+        clientId: 'unregistered-client',
+        resource: `${baseUrl}/mcp`,
+        browserOpener: opener,
+        registerDynamicRedirect: false,
+        timeoutMs: 200,
+      }),
+    ).rejects.toThrow();
   });
 });
