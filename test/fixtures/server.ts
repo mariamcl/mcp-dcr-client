@@ -189,6 +189,104 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
     res.status(400).json({ error: 'unsupported_grant_type' });
   });
 
+  // GET /mcp without Authorization → 401 with WWW-Authenticate
+  app.get('/mcp', (_req, res) => {
+    res.status(401).set(
+      'WWW-Authenticate',
+      `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
+    ).end();
+  });
+
+  // POST /mcp — minimal MCP JSON-RPC for tools/list and tools/call
+  app.post('/mcp', (req, res) => {
+    const auth = req.header('authorization');
+    if (!auth?.startsWith('Bearer ')) {
+      res.status(401).set(
+        'WWW-Authenticate',
+        `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
+      ).end();
+      return;
+    }
+    const token = auth.slice('Bearer '.length);
+    const tokenInfo = accessTokens.get(token);
+    if (!tokenInfo || tokenInfo.expiresAt < Date.now()) {
+      res.status(401).end();
+      return;
+    }
+
+    const { id, method, params } = req.body as {
+      id: string | number;
+      method: string;
+      params?: Record<string, unknown>;
+    };
+
+    if (method === 'initialize') {
+      res.json({
+        jsonrpc: '2.0',
+        id,
+        result: {
+          protocolVersion: '2024-11-05',
+          capabilities: { tools: {} },
+          serverInfo: { name: 'fixture-mcp', version: '0.0.0' },
+        },
+      });
+      return;
+    }
+    if (method === 'tools/list') {
+      res.json({
+        jsonrpc: '2.0',
+        id,
+        result: {
+          tools: [
+            {
+              name: 'echo',
+              description: 'Echoes back its text input',
+              inputSchema: {
+                type: 'object',
+                properties: { text: { type: 'string' } },
+                required: ['text'],
+              },
+            },
+            {
+              name: 'add',
+              description: 'Adds two numbers',
+              inputSchema: {
+                type: 'object',
+                properties: { a: { type: 'number' }, b: { type: 'number' } },
+                required: ['a', 'b'],
+              },
+            },
+          ],
+        },
+      });
+      return;
+    }
+    if (method === 'tools/call') {
+      const name = (params as { name: string }).name;
+      const args = (params as { arguments: Record<string, unknown> }).arguments;
+      if (name === 'echo') {
+        res.json({
+          jsonrpc: '2.0',
+          id,
+          result: { content: [{ type: 'text', text: String(args.text) }] },
+        });
+        return;
+      }
+      if (name === 'add') {
+        const sum = Number(args.a) + Number(args.b);
+        res.json({
+          jsonrpc: '2.0',
+          id,
+          result: { content: [{ type: 'text', text: String(sum) }] },
+        });
+        return;
+      }
+      res.json({ jsonrpc: '2.0', id, error: { code: -32601, message: `unknown tool: ${name}` } });
+      return;
+    }
+    res.json({ jsonrpc: '2.0', id, error: { code: -32601, message: `unknown method: ${method}` } });
+  });
+
   // /.well-known/oauth-protected-resource (issued by the MCP resource server)
   app.get('/.well-known/oauth-protected-resource', (_req, res) => {
     res.json({
