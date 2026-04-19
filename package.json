@@ -7,7 +7,7 @@
   "bin": { "mcp-dcr-client": "./bin/mcp-dcr-client" },
   "scripts": {
     "build": "tsc",
-    "start": "node --loader tsx src/cli.ts",
+    "start": "node --import tsx src/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
