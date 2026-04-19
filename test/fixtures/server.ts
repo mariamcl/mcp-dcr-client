@@ -4,6 +4,9 @@ import type { Server } from 'node:http';
 export interface FixtureServer {
   baseUrl: string;
   close: () => Promise<void>;
+  state: {
+    clients: Map<string, { redirectUris: string[]; clientName?: string }>;
+  };
 }
 
 export interface FixtureOptions {
@@ -18,6 +21,9 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
 
   // Will be set after listen
   let baseUrl = '';
+
+  // In-memory store of registered clients
+  const clients = new Map<string, { redirectUris: string[]; clientName?: string }>();
 
   // /.well-known/oauth-protected-resource (issued by the MCP resource server)
   app.get('/.well-known/oauth-protected-resource', (_req, res) => {
@@ -41,6 +47,28 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
     });
   });
 
+  // Dynamic Client Registration (RFC 7591)
+  app.post('/register', (req, res) => {
+    const { redirect_uris, client_name } = req.body as {
+      redirect_uris?: string[];
+      client_name?: string;
+    };
+    if (!Array.isArray(redirect_uris) || redirect_uris.length === 0) {
+      res.status(400).json({ error: 'invalid_redirect_uri', error_description: 'redirect_uris is required' });
+      return;
+    }
+    const clientId = `dyn-${Math.random().toString(36).slice(2, 12)}`;
+    clients.set(clientId, { redirectUris: redirect_uris, clientName: client_name });
+    res.status(201).json({
+      client_id: clientId,
+      redirect_uris,
+      client_name,
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      token_endpoint_auth_method: 'none',
+    });
+  });
+
   return new Promise((resolve, reject) => {
     const server: Server = app.listen(opts.port ?? 0, '127.0.0.1', () => {
       const addr = server.address();
@@ -53,6 +81,7 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
         baseUrl,
         close: () =>
           new Promise<void>((res, rej) => server.close((err) => (err ? rej(err) : res()))),
+        state: { clients },
       });
     });
     server.on('error', reject);
