@@ -35,6 +35,14 @@ describe('errors', () => {
     expect(err.errorDescription).toBe('User clicked deny');
   });
 
+  it('AuthorizationDenied without description omits the dash', () => {
+    const err = new AuthorizationDenied('access_denied');
+    expect(err.errorCode).toBe('access_denied');
+    expect(err.errorDescription).toBeUndefined();
+    expect(err.message).toBe('Authorization denied: access_denied');
+    expect(err.message).not.toContain('—');
+  });
+
   it('TokenExchangeFailed carries status + body', () => {
     const err = new TokenExchangeFailed(400, 'invalid_grant');
     expect(err.name).toBe('TokenExchangeFailed');
