@@ -61,12 +61,14 @@ export class Client {
         "AS metadata has no registration_endpoint — server doesn't support DCR",
       );
     }
+    /* c8 ignore start -- real-browser fallback; tests always supply browserOpener */
     const browserOpener =
       opts.browserOpener ??
       (async (url: string) => {
         const open = (await import('open')).default;
         await open(url);
       });
+    /* c8 ignore end */
 
     const result = await runOAuthFlow({
       endpoints,

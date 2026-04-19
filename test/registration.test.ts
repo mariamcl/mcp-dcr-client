@@ -1,6 +1,7 @@
-import { describe, it, expect, inject } from 'vitest';
+import { describe, it, expect, inject, afterEach } from 'vitest';
 import { register } from '../src/registration.js';
 import { RegistrationFailed } from '../src/errors.js';
+import { startServer, type FixtureServer } from './fixtures/server.js';
 
 const baseUrl = inject('fixtureBaseUrl');
 
@@ -30,6 +31,41 @@ describe('register', () => {
         redirectUris: ['http://127.0.0.1:9999/cb'],
         clientName: 'x',
         serverUrl: 'http://127.0.0.1:1/mcp',
+      }),
+    ).rejects.toBeInstanceOf(RegistrationFailed);
+  });
+});
+
+describe('register edge cases (mode-controlled fixture)', () => {
+  let fixture: FixtureServer;
+
+  afterEach(async () => {
+    if (fixture) {
+      fixture.state.mode = 'normal';
+      await fixture.close();
+    }
+  });
+
+  it('throws RegistrationFailed when response body is malformed JSON', async () => {
+    fixture = await startServer({ autoApprove: true });
+    fixture.state.mode = 'register_malformed_json';
+    await expect(
+      register(`${fixture.baseUrl}/register`, {
+        redirectUris: ['http://127.0.0.1:9999/cb'],
+        clientName: 'test',
+        serverUrl: `${fixture.baseUrl}/mcp`,
+      }),
+    ).rejects.toBeInstanceOf(RegistrationFailed);
+  });
+
+  it('throws RegistrationFailed when response is valid JSON but missing client_id', async () => {
+    fixture = await startServer({ autoApprove: true });
+    fixture.state.mode = 'register_no_client_id';
+    await expect(
+      register(`${fixture.baseUrl}/register`, {
+        redirectUris: ['http://127.0.0.1:9999/cb'],
+        clientName: 'test',
+        serverUrl: `${fixture.baseUrl}/mcp`,
       }),
     ).rejects.toBeInstanceOf(RegistrationFailed);
   });

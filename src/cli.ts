@@ -130,6 +130,7 @@ function parseValue(raw: string): unknown {
 }
 
 function formatError(e: unknown, serverUrl: string): string {
+  /* c8 ignore next 3 -- defensive guard for non-object throws; all app errors are Error instances */
   if (!e || typeof e !== 'object' || !('name' in e)) {
     return `✗ Unexpected error: ${String(e)}\n`;
   }
@@ -156,6 +157,7 @@ function formatError(e: unknown, serverUrl: string): string {
 }
 
 // Real-process entry point
+/* c8 ignore start -- only runs when cli.ts is executed directly, not imported in tests */
 if (import.meta.url === `file://${process.argv[1]}`) {
   runCli(process.argv.slice(2))
     .then((r) => {
@@ -168,3 +170,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.exit(2);
     });
 }
+/* c8 ignore end */

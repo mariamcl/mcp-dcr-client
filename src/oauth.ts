@@ -70,6 +70,7 @@ export async function startCallbackServer(expectedState: string): Promise<Callba
   return new Promise((resolve, reject) => {
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address();
+      /* c8 ignore next 4 -- defensive guard; server.address() is always an object after listen */
       if (typeof addr !== 'object' || !addr) {
         reject(new Error('Failed to get address'));
         return;
@@ -78,6 +79,7 @@ export async function startCallbackServer(expectedState: string): Promise<Callba
       resolve({
         url,
         waitForCode: () => codePromise,
+        /* c8 ignore next -- server.close error callback only fires on Node.js internal errors */
         close: () => new Promise<void>((res, rej) => server.close((err) => (err ? rej(err) : res()))),
       });
     });

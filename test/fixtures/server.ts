@@ -9,6 +9,18 @@ export interface FixtureServer {
     codes: Map<string, { clientId: string; codeChallenge: string; redirectUri: string; resource: string; scope?: string }>;
     refreshTokens: Map<string, { clientId: string; scope?: string; resource: string }>;
     accessTokens: Map<string, { clientId: string; scope?: string; resource: string; expiresAt: number }>;
+    /**
+     * Test-only mode flags for edge-case routes:
+     * - 'normal'                  – default behaviour
+     * - 'pr_empty_servers'        – /.well-known/oauth-protected-resource returns {} (no authorization_servers)
+     * - 'pr_empty_as_url'         – /.well-known/oauth-protected-resource returns authorization_servers: ['']
+     * - 'as_missing_endpoints'    – /.well-known/oauth-authorization-server omits authorization_endpoint
+     * - 'register_malformed_json' – /register returns malformed JSON with 200
+     * - 'register_no_client_id'   – /register returns valid JSON without client_id
+     * - 'token_malformed_json'    – /token returns malformed JSON with 200
+     * - 'token_no_access_token'   – /token returns valid JSON without access_token
+     */
+    mode: string;
   };
 }
 
@@ -36,6 +48,9 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
   // In-memory tokens
   const refreshTokens = new Map<string, { clientId: string; scope?: string; resource: string }>();
   const accessTokens = new Map<string, { clientId: string; scope?: string; resource: string; expiresAt: number }>();
+
+  // Test-only mode flag – mutate via fixture.state.mode before a request
+  let mode = 'normal';
 
   // GET /authorize — auto-approve in test mode, render approve page otherwise
   app.get('/authorize', (req, res) => {
@@ -111,6 +126,34 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
 
   // POST /token — supports authorization_code + refresh_token grants
   app.post('/token', async (req, res) => {
+    if (mode === 'token_malformed_json') {
+      res.status(200).set('Content-Type', 'application/json').send('{not valid json');
+      return;
+    }
+    if (mode === 'token_no_access_token') {
+      res.status(200).json({ token_type: 'Bearer', expires_in: 3600 }); // no access_token
+      return;
+    }
+    if (mode === 'token_error_response') {
+      res.status(400).json({ error: 'server_error', error_description: 'forced test error' });
+      return;
+    }
+    if (mode === 'token_no_expires_in') {
+      // Return valid token response but without expires_in field
+      const accessToken2 = `at-${Math.random().toString(36).slice(2, 18)}`;
+      const refreshToken2 = `rt-${Math.random().toString(36).slice(2, 18)}`;
+      res.json({ access_token: accessToken2, refresh_token: refreshToken2, token_type: 'Bearer' });
+      return;
+    }
+    if (mode === 'refresh_no_refresh_token') {
+      // Return a refresh response without a refresh_token (non-rotating server)
+      const grantType = req.body.grant_type as string | undefined;
+      if (grantType === 'refresh_token') {
+        const accessToken3 = `at-${Math.random().toString(36).slice(2, 18)}`;
+        res.json({ access_token: accessToken3, token_type: 'Bearer', expires_in: 3600 });
+        return;
+      }
+    }
     const grantType = req.body.grant_type as string | undefined;
     if (grantType === 'authorization_code') {
       const { code, code_verifier, redirect_uri, client_id, resource } = req.body as Record<
@@ -233,11 +276,9 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
       return;
     }
     if (method === 'tools/list') {
-      res.json({
-        jsonrpc: '2.0',
-        id,
-        result: {
-          tools: [
+      const toolsList = mode === 'tools_no_description'
+        ? [{ name: 'nodesc' }] // tool without description field
+        : [
             {
               name: 'echo',
               description: 'Echoes back its text input',
@@ -256,9 +297,8 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
                 required: ['a', 'b'],
               },
             },
-          ],
-        },
-      });
+          ];
+      res.json({ jsonrpc: '2.0', id, result: { tools: toolsList } });
       return;
     }
     if (method === 'tools/call') {
@@ -289,6 +329,14 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
 
   // /.well-known/oauth-protected-resource (issued by the MCP resource server)
   app.get('/.well-known/oauth-protected-resource', (_req, res) => {
+    if (mode === 'pr_empty_servers') {
+      res.json({ resource: `${baseUrl}/mcp` }); // no authorization_servers key
+      return;
+    }
+    if (mode === 'pr_empty_as_url') {
+      res.json({ resource: `${baseUrl}/mcp`, authorization_servers: [''] });
+      return;
+    }
     res.json({
       resource: `${baseUrl}/mcp`,
       authorization_servers: [baseUrl],
@@ -297,6 +345,15 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
 
   // /.well-known/oauth-authorization-server (issued by the AS)
   app.get('/.well-known/oauth-authorization-server', (_req, res) => {
+    if (mode === 'as_missing_endpoints') {
+      // Return metadata that intentionally omits authorization_endpoint and token_endpoint
+      res.json({ issuer: baseUrl, registration_endpoint: `${baseUrl}/register` });
+      return;
+    }
+    if (mode === 'as_malformed_json') {
+      res.status(200).set('Content-Type', 'application/json').send('{not valid json');
+      return;
+    }
     res.json({
       issuer: baseUrl,
       authorization_endpoint: `${baseUrl}/authorize`,
@@ -311,6 +368,14 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
 
   // Dynamic Client Registration (RFC 7591)
   app.post('/register', (req, res) => {
+    if (mode === 'register_malformed_json') {
+      res.status(200).set('Content-Type', 'application/json').send('{not valid json');
+      return;
+    }
+    if (mode === 'register_no_client_id') {
+      res.status(201).json({ redirect_uris: ['http://127.0.0.1/cb'] }); // no client_id
+      return;
+    }
     const { redirect_uris, client_name } = req.body as {
       redirect_uris?: string[];
       client_name?: string;
@@ -343,7 +408,14 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
         baseUrl,
         close: () =>
           new Promise<void>((res, rej) => server.close((err) => (err ? rej(err) : res()))),
-        state: { clients, codes, refreshTokens, accessTokens },
+        state: {
+          clients,
+          codes,
+          refreshTokens,
+          accessTokens,
+          get mode() { return mode; },
+          set mode(v: string) { mode = v; },
+        },
       });
     });
     server.on('error', reject);

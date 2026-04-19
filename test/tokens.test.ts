@@ -6,6 +6,7 @@ import {
   saveStoredCreds,
   deleteStoredCreds,
   fileForServer,
+  defaultConfigDir,
   type StoredCreds,
 } from '../src/tokens.js';
 import { NoStoredCredentials, RefreshFailed } from '../src/errors.js';
@@ -31,6 +32,14 @@ const sample: StoredCreds = {
     expiresAt: '2099-01-01T00:00:00.000Z',
   },
 };
+
+describe('defaultConfigDir', () => {
+  it('returns a path under ~/.config', () => {
+    const dir = defaultConfigDir();
+    expect(dir).toMatch(/mcp-dcr-client$/);
+    expect(dir).toMatch(/\.config/);
+  });
+});
 
 describe('token storage', () => {
   it('saveStoredCreds + loadStoredCreds roundtrip', async () => {
@@ -78,6 +87,30 @@ describe('token storage', () => {
     await expect(loadStoredCreds(sample.serverUrl, configDir)).rejects.toBeInstanceOf(
       NoStoredCredentials,
     );
+  });
+
+  it('deleteStoredCreds re-throws non-ENOENT filesystem errors', async () => {
+    // Create a DIRECTORY at the path that would be the creds file
+    // unlink on a directory fails with EISDIR (not ENOENT), so it should re-throw
+    const { mkdir: mkdirFn2 } = await import('node:fs/promises');
+    const path = fileForServer(sample.serverUrl, configDir);
+    await mkdirFn2(path, { recursive: true }); // create it as a directory
+    await expect(deleteStoredCreds(sample.serverUrl, configDir)).rejects.toMatchObject({
+      code: expect.stringMatching(/^(EISDIR|EPERM)$/),
+    });
+  });
+
+  it('loadStoredCreds re-throws non-ENOENT filesystem errors', async () => {
+    // Write the creds file, then replace it with a directory so readFile throws EISDIR
+    await saveStoredCreds(sample, configDir);
+    const path = fileForServer(sample.serverUrl, configDir);
+    // Remove the file and create a directory with the same name to trigger a non-ENOENT error
+    const { unlink, mkdir: mkdirFn } = await import('node:fs/promises');
+    await unlink(path);
+    await mkdirFn(path);
+    await expect(loadStoredCreds(sample.serverUrl, configDir)).rejects.toMatchObject({
+      code: 'EISDIR',
+    });
   });
 });
 
@@ -154,5 +187,97 @@ describe('getValidAccessToken (refresh)', () => {
     await expect(
       getValidAccessToken('https://nope/mcp', endpoints, configDir),
     ).rejects.toBeInstanceOf(NoStoredCredentials);
+  });
+
+  it('throws RefreshFailed (no refresh token) and deletes creds when refreshToken is absent', async () => {
+    const creds: StoredCreds = {
+      serverUrl: `${baseUrl}/mcp`,
+      registration: { clientId: 'x', registeredAt: new Date().toISOString() },
+      tokens: {
+        accessToken: 'expired',
+        // no refreshToken
+        expiresAt: new Date(Date.now() - 1000).toISOString(),
+      },
+    };
+    await saveStoredCreds(creds, configDir);
+    const endpoints = await discover(`${baseUrl}/mcp`);
+    await expect(getValidAccessToken(creds.serverUrl, endpoints, configDir)).rejects.toBeInstanceOf(
+      RefreshFailed,
+    );
+    // Creds file should have been deleted
+    await expect(loadStoredCreds(creds.serverUrl, configDir)).rejects.toBeInstanceOf(
+      NoStoredCredentials,
+    );
+  });
+
+  it('preserves existing refreshToken when refresh response omits refresh_token', async () => {
+    // Need a fixture that returns no refresh_token in the refresh response
+    const { startServer: startSrv } = await import('./fixtures/server.js');
+    const fixture = await startSrv({ autoApprove: true });
+    try {
+      // First do a full login to get real creds
+      const { discover: disc } = await import('../src/discovery.js');
+      const { runOAuthFlow: flow } = await import('../src/oauth.js');
+      const endpoints = await disc(`${fixture.baseUrl}/mcp`);
+      const opener = async (url: string) => {
+        const res = await fetch(url, { redirect: 'manual' });
+        const loc = res.headers.get('location');
+        if (loc) await fetch(loc);
+      };
+      const result = await flow({
+        endpoints,
+        clientId: 'placeholder',
+        resource: `${fixture.baseUrl}/mcp`,
+        browserOpener: opener,
+        registerDynamicRedirect: true,
+      });
+      const creds: StoredCreds = {
+        serverUrl: `${fixture.baseUrl}/mcp`,
+        registration: { clientId: result.clientId, registeredAt: new Date().toISOString() },
+        tokens: {
+          accessToken: result.tokens.accessToken,
+          refreshToken: result.tokens.refreshToken,
+          expiresAt: new Date(Date.now() - 1000).toISOString(), // force refresh
+        },
+      };
+      await saveStoredCreds(creds, configDir);
+
+      // Now switch to mode that returns no refresh_token on refresh
+      fixture.state.mode = 'refresh_no_refresh_token';
+
+      const at = await getValidAccessToken(creds.serverUrl, endpoints, configDir);
+      expect(at).toMatch(/^at-/);
+
+      // The old refreshToken should be preserved since the new response omitted it
+      const reloaded = await loadStoredCreds(creds.serverUrl, configDir);
+      expect(reloaded.tokens.refreshToken).toBe(creds.tokens.refreshToken);
+    } finally {
+      fixture.state.mode = 'normal';
+      await fixture.close();
+    }
+  });
+
+  it('re-throws non-TokenExchangeFailed errors during refresh', async () => {
+    const creds: StoredCreds = {
+      serverUrl: 'http://127.0.0.1:1/mcp',
+      registration: { clientId: 'x', registeredAt: new Date().toISOString() },
+      tokens: {
+        accessToken: 'expired',
+        refreshToken: 'some-token',
+        expiresAt: new Date(Date.now() - 1000).toISOString(),
+      },
+    };
+    await saveStoredCreds(creds, configDir);
+    // Use a bad (unreachable) token endpoint — fetch will throw a network error,
+    // which is NOT a TokenExchangeFailed, so getValidAccessToken should re-throw it.
+    const endpoints = {
+      issuer: 'http://127.0.0.1:1',
+      authorizationEndpoint: 'http://127.0.0.1:1/authorize',
+      tokenEndpoint: 'http://127.0.0.1:1/token',
+      resource: 'http://127.0.0.1:1/mcp',
+    };
+    await expect(
+      getValidAccessToken(creds.serverUrl, endpoints, configDir),
+    ).rejects.toMatchObject({ name: 'TypeError' });
   });
 });
