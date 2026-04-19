@@ -1,2 +1,6 @@
 #!/usr/bin/env node
-import('../dist/cli.js');
+const { runCli } = await import('../dist/src/cli.js');
+const r = await runCli(process.argv.slice(2));
+if (r.stdout) process.stdout.write(r.stdout);
+if (r.stderr) process.stderr.write(r.stderr);
+process.exit(r.exitCode);
