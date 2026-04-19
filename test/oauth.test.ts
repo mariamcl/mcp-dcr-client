@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateCodeVerifier, generateCodeChallenge, generateState, startCallbackServer } from '../src/oauth.js';
 import { createHash } from 'node:crypto';
-import { runOAuthFlow } from '../src/oauth.js';
+import { runOAuthFlow, refreshTokens } from '../src/oauth.js';
 import { register } from '../src/registration.js';
 import { discover } from '../src/discovery.js';
 import { TokenExchangeFailed } from '../src/errors.js';
@@ -146,5 +146,46 @@ describe('runOAuthFlow', () => {
         timeoutMs: 200,
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe('refreshTokens', () => {
+  it('exchanges a refresh token for new tokens (rotation)', async () => {
+    // Get an initial refresh token via the full flow
+    const endpoints = await discover(`${baseUrl}/mcp`);
+    const opener = async (url: string) => {
+      const res = await fetch(url, { redirect: 'manual' });
+      const loc = res.headers.get('location');
+      if (loc) await fetch(loc);
+    };
+    const initial = await runOAuthFlow({
+      endpoints,
+      clientId: 'placeholder',
+      resource: `${baseUrl}/mcp`,
+      browserOpener: opener,
+      registerDynamicRedirect: true,
+    });
+    expect(initial.tokens.refreshToken).toBeDefined();
+
+    const refreshed = await refreshTokens({
+      tokenEndpoint: endpoints.tokenEndpoint,
+      refreshToken: initial.tokens.refreshToken!,
+      clientId: initial.clientId,
+    });
+    expect(refreshed.accessToken).toMatch(/^at-/);
+    expect(refreshed.accessToken).not.toBe(initial.tokens.accessToken);
+    expect(refreshed.refreshToken).toMatch(/^rt-/);
+    expect(refreshed.refreshToken).not.toBe(initial.tokens.refreshToken);
+  });
+
+  it('throws TokenExchangeFailed on invalid refresh token', async () => {
+    const endpoints = await discover(`${baseUrl}/mcp`);
+    await expect(
+      refreshTokens({
+        tokenEndpoint: endpoints.tokenEndpoint,
+        refreshToken: 'totally-bogus',
+        clientId: 'whatever',
+      }),
+    ).rejects.toBeInstanceOf(TokenExchangeFailed);
   });
 });

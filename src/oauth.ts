@@ -234,12 +234,20 @@ export async function refreshTokens(params: {
   if (!res.ok) {
     throw new TokenExchangeFailed(res.status, text);
   }
-  const parsed = JSON.parse(text) as {
-    access_token: string;
+  let parsed: {
+    access_token?: string;
     refresh_token?: string;
     expires_in?: number;
     scope?: string;
   };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new TokenExchangeFailed(res.status, `malformed JSON: ${text}`);
+  }
+  if (!parsed.access_token) {
+    throw new TokenExchangeFailed(res.status, 'response missing access_token');
+  }
   return {
     accessToken: parsed.access_token,
     refreshToken: parsed.refresh_token,
