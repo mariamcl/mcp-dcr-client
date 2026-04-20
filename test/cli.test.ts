@@ -298,15 +298,49 @@ describe('CLI tools listing without description', () => {
 });
 
 describe('CLI call with non-matching args', () => {
-  it('ignores call args that do not match --key=value pattern', async () => {
+  it('errors on call args that do not match --key=value pattern', async () => {
     await runCli(['login', `${baseUrl}/mcp`], { configDir, browserOpener: opener });
-    // Pass a bare positional arg after server/tool — it won't match --key=val so should be ignored
+    // Pass a bare positional arg after server/tool — should error
     const result = await runCli(
       ['call', `${baseUrl}/mcp`, 'echo', 'bare-arg', '--text=hello'],
       { configDir, browserOpener: opener },
     );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toMatch(/--key=value/);
+  });
+});
+
+describe('call positional-arg guard', () => {
+  it('errors when an arg is positional instead of --key=value', async () => {
+    await runCli(['login', `${baseUrl}/mcp`], { configDir, browserOpener: opener });
+    const result = await runCli(['call', `${baseUrl}/mcp`, 'add', '1', '1'], {
+      configDir,
+      browserOpener: opener,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toMatch(/--key=value/);
+    // Make sure it mentions one of the offending args
+    expect(result.stderr).toMatch(/'1'/);
+  });
+
+  it('errors when a flag has no value (--text without =)', async () => {
+    await runCli(['login', `${baseUrl}/mcp`], { configDir, browserOpener: opener });
+    const result = await runCli(['call', `${baseUrl}/mcp`, 'echo', '--text'], {
+      configDir,
+      browserOpener: opener,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toMatch(/--key=value/);
+  });
+
+  it('still accepts well-formed --key=value args', async () => {
+    await runCli(['login', `${baseUrl}/mcp`], { configDir, browserOpener: opener });
+    const result = await runCli(['call', `${baseUrl}/mcp`, 'add', '--a=1', '--b=1'], {
+      configDir,
+      browserOpener: opener,
+    });
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain('hello');
+    expect(result.stdout).toContain('2');
   });
 });
 

@@ -84,11 +84,22 @@ export async function runCli(argv: string[], opts: CliOptions = {}): Promise<Cli
     .action(async (server: string, tool: string, _opts, cmd: Command) => {
       try {
         const args: Record<string, unknown> = {};
+        const bad: string[] = [];
         for (const raw of cmd.args.slice(2)) {
           const m = /^--([^=]+)=(.*)$/.exec(raw);
-          if (!m) continue;
+          if (!m) {
+            bad.push(raw);
+            continue;
+          }
           const [, key, val] = m;
           args[key!] = parseValue(val!);
+        }
+        if (bad.length > 0) {
+          stderr +=
+            `✗ Tool args must be passed as --key=value. Got: ${bad.map((b) => `'${b}'`).join(', ')}\n` +
+            `  Example: mcp-dcr-client call ${server} ${tool} --foo=bar\n`;
+          exitCode = 1;
+          return;
         }
         const client = await Client.connect(server, {
           configDir: opts.configDir,
