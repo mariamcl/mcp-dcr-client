@@ -334,6 +334,16 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
         });
         return;
       }
+      if (name === 'search') {
+        const query = args.query ? String(args.query) : '(none)';
+        const limit = args.limit ? Number(args.limit) : 10;
+        res.json({
+          jsonrpc: '2.0',
+          id,
+          result: { content: [{ type: 'text', text: `searched for "${query}" (limit ${limit})` }] },
+        });
+        return;
+      }
       res.json({ jsonrpc: '2.0', id, error: { code: -32601, message: `unknown tool: ${name}` } });
       return;
     }
