@@ -52,6 +52,15 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
   // Test-only mode flag – mutate via fixture.state.mode before a request
   let mode = 'normal';
 
+  function escapeHtml(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   // GET /authorize — auto-approve in test mode, render approve page otherwise
   app.get('/authorize', (req, res) => {
     const {
@@ -104,16 +113,108 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
       return;
     }
 
+    const clientLabel = escapeHtml(client.clientName ?? client_id);
+    const safeCode = escapeHtml(code);
+    const safeRedirectUri = escapeHtml(redirect_uri);
+    const safeState = escapeHtml(state ?? '');
+
     res.send(`<!doctype html>
-<html><body>
-<h1>Authorize ${client.clientName ?? client_id}?</h1>
-<form method="POST" action="/authorize/approve">
-  <input type="hidden" name="code" value="${code}">
-  <input type="hidden" name="redirect_uri" value="${redirect_uri}">
-  <input type="hidden" name="state" value="${state}">
-  <button type="submit">Approve</button>
-</form>
-</body></html>`);
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorize ${clientLabel}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f7f7f8;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      color: #111;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #e5e5e5;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.07);
+      padding: 2.5rem 2rem;
+      width: 100%;
+      max-width: 420px;
+    }
+    .badge {
+      display: inline-block;
+      font-size: .7rem;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: #6b7280;
+      background: #f3f4f6;
+      border-radius: 4px;
+      padding: .2rem .5rem;
+      margin-bottom: 1.25rem;
+    }
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      line-height: 1.3;
+      margin-bottom: .5rem;
+    }
+    .subtitle {
+      font-size: .875rem;
+      color: #6b7280;
+      margin-bottom: 1.75rem;
+    }
+    .meta {
+      background: #f9fafb;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      padding: .85rem 1rem;
+      margin-bottom: 1.75rem;
+      font-size: .8rem;
+      color: #6b7280;
+      word-break: break-all;
+    }
+    .meta strong { color: #374151; display: block; margin-bottom: .2rem; }
+    .meta + .meta { margin-top: -.75rem; }
+    button[type="submit"] {
+      width: 100%;
+      background: #111;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: .8rem 1rem;
+      font-size: .95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    button[type="submit"]:hover { background: #333; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <span class="badge">Demo fixture</span>
+    <h1>Authorize ${clientLabel}?</h1>
+    <p class="subtitle">This is a local fixture server used for offline testing.</p>
+    <div class="meta">
+      <strong>Redirect URI</strong>${safeRedirectUri}
+    </div>
+    <div class="meta">
+      <strong>State</strong>${safeState}
+    </div>
+    <form method="POST" action="/authorize/approve">
+      <input type="hidden" name="code" value="${safeCode}">
+      <input type="hidden" name="redirect_uri" value="${safeRedirectUri}">
+      <input type="hidden" name="state" value="${safeState}">
+      <button type="submit">Approve</button>
+    </form>
+  </div>
+</body>
+</html>`);
   });
 
   app.post('/authorize/approve', (req, res) => {

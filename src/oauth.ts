@@ -47,7 +47,72 @@ export async function startCallbackServer(expectedState: string): Promise<Callba
 
     if (error) {
       res.writeHead(400, { 'Content-Type': 'text/html' });
-      res.end('<h1>Authorization failed</h1><p>You can close this tab.</p>');
+      const safeError = error.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      res.end(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorization failed</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f7f7f8;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      color: #111;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #e5e5e5;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.07);
+      padding: 2.5rem 2rem;
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+    .icon {
+      font-size: 3rem;
+      color: #ef4444;
+      margin-bottom: 1rem;
+      line-height: 1;
+    }
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      margin-bottom: .5rem;
+    }
+    .caption {
+      font-size: .875rem;
+      color: #6b7280;
+      margin-bottom: 1.25rem;
+    }
+    .error-code {
+      display: inline-block;
+      font-size: .75rem;
+      font-family: ui-monospace, 'Cascadia Code', monospace;
+      background: #fef2f2;
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+      border-radius: 6px;
+      padding: .3rem .65rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">&#x2717;</div>
+    <h1>Authorization failed</h1>
+    <p class="caption">You can close this tab.</p>
+    <span class="error-code">${safeError}</span>
+  </div>
+</body>
+</html>`);
       rejectCode(new AuthorizationDenied(error, errorDescription));
       return;
     }
@@ -63,7 +128,59 @@ export async function startCallbackServer(expectedState: string): Promise<Callba
       return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end('<h1>Logged in</h1><p>You can close this tab.</p>');
+    res.end(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>You're logged in</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f7f7f8;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      color: #111;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #e5e5e5;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.07);
+      padding: 2.5rem 2rem;
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+    .icon {
+      font-size: 3rem;
+      color: #16a34a;
+      margin-bottom: 1rem;
+      line-height: 1;
+    }
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      margin-bottom: .5rem;
+    }
+    .caption {
+      font-size: .875rem;
+      color: #6b7280;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">&#x2713;</div>
+    <h1>Logged in</h1>
+    <p class="caption">You can close this tab.</p>
+  </div>
+</body>
+</html>`);
     resolveCode(code);
   });
 
