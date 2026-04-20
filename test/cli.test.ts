@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, inject } from 'vitest';
 import { makeTempDir } from './helpers.js';
 import { runCli, formatToolSchema } from '../src/cli.js';
-import { saveStoredCreds, type StoredCreds } from '../src/tokens.js';
+import { saveStoredCreds, type StoredCreds, fileForServer } from '../src/tokens.js';
 import { startServer, type FixtureServer } from './fixtures/server.js';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
+import { existsSync } from 'node:fs';
 
 const baseUrl = inject('fixtureBaseUrl');
 
@@ -477,5 +478,32 @@ describe('formatToolSchema unit tests', () => {
     });
     expect(out).toMatch(/string\|null/);
     expect(out).toMatch(/optional array-type/);
+  });
+});
+
+describe('logout command', () => {
+  it('deletes the stored credentials file', async () => {
+    await runCli(['login', `${baseUrl}/mcp`], { configDir, browserOpener: opener });
+    const credsPath = fileForServer(`${baseUrl}/mcp`, configDir);
+    expect(existsSync(credsPath)).toBe(true);
+
+    const result = await runCli(['logout', `${baseUrl}/mcp`], { configDir });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/Logged out/);
+    expect(existsSync(credsPath)).toBe(false);
+  });
+
+  it('is idempotent (succeeds even when already logged out)', async () => {
+    const result = await runCli(['logout', `${baseUrl}/mcp`], { configDir });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/already logged out|No stored credentials/);
+  });
+
+  it('subsequent tools call after logout requires re-login', async () => {
+    await runCli(['login', `${baseUrl}/mcp`], { configDir, browserOpener: opener });
+    await runCli(['logout', `${baseUrl}/mcp`], { configDir });
+    const result = await runCli(['tools', `${baseUrl}/mcp`], { configDir });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toMatch(/No stored credentials/);
   });
 });

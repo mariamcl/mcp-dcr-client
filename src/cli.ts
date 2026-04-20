@@ -1,6 +1,8 @@
 import { Command } from 'commander';
 import { Client, type ToolDescriptor } from './client.js';
 import { NoStoredCredentials } from './errors.js';
+import { deleteStoredCreds, defaultConfigDir, fileForServer } from './tokens.js';
+import { existsSync } from 'node:fs';
 
 export interface CliOptions {
   configDir?: string;
@@ -52,6 +54,27 @@ export async function runCli(argv: string[], opts: CliOptions = {}): Promise<Cli
           browserOpener: opts.browserOpener,
         });
         stdout += `✓ Logged in to ${server}\n`;
+      } catch (e) {
+        stderr += formatError(e, server);
+        exitCode = 1;
+      }
+    });
+
+  program
+    .command('logout <server>')
+    .description('Delete stored credentials for an MCP server')
+    .action(async (server: string) => {
+      try {
+        const configDirToUse = opts.configDir ?? defaultConfigDir();
+        const path = fileForServer(server, configDirToUse);
+        const wasPresent = existsSync(path);
+        await deleteStoredCreds(server, configDirToUse);
+        const host = new URL(server).host;
+        if (wasPresent) {
+          stdout += `✓ Logged out of ${host}\n`;
+        } else {
+          stdout += `✓ No stored credentials for ${host} (already logged out)\n`;
+        }
       } catch (e) {
         stderr += formatError(e, server);
         exitCode = 1;

@@ -17,6 +17,7 @@ npm run build
 ./bin/mcp-dcr-client tools https://mcp.linear.app/sse
 ./bin/mcp-dcr-client describe https://mcp.linear.app/sse <tool>
 ./bin/mcp-dcr-client call https://mcp.linear.app/sse <tool> --arg=value
+./bin/mcp-dcr-client logout https://mcp.linear.app/sse  # delete stored credentials
 ```
 
 `describe` pretty-prints the input schema for a single tool — required and optional parameters, their types, and descriptions — so you can see what arguments a tool accepts without reading the full `tools` output.
@@ -62,7 +63,7 @@ See `docs/superpowers/specs/2026-04-18-mcp-dcr-client-design.md` for the full de
 | `src/oauth.ts` | PKCE primitives, loopback callback server, token exchange, refresh |
 | `src/tokens.ts` | Persistent storage with auto-refresh |
 | `src/client.ts` | Orchestrator + MCP session |
-| `src/cli.ts` | Three commands: `login`, `tools`, `call` |
+| `src/cli.ts` | Four commands: `login`, `logout`, `tools`, `call`, `describe` |
 | `src/errors.ts` | Typed error classes per failure mode |
 
 ## Tests
