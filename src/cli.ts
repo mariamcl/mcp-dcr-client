@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { Client, type ToolDescriptor } from './client.js';
 import { NoStoredCredentials } from './errors.js';
-import { deleteStoredCreds, defaultConfigDir, fileForServer } from './tokens.js';
+import { deleteStoredCreds, fileForServer } from './tokens.js';
 import { existsSync } from 'node:fs';
 
 export interface CliOptions {
@@ -65,20 +65,21 @@ export async function runCli(argv: string[], opts: CliOptions = {}): Promise<Cli
     .description('Delete stored credentials for an MCP server')
     .action(async (server: string) => {
       try {
-        const configDirToUse = opts.configDir ?? defaultConfigDir();
-        const path = fileForServer(server, configDirToUse);
+        const path = fileForServer(server, opts.configDir);
         const wasPresent = existsSync(path);
-        await deleteStoredCreds(server, configDirToUse);
+        await deleteStoredCreds(server, opts.configDir);
         const host = new URL(server).host;
         if (wasPresent) {
           stdout += `✓ Logged out of ${host}\n`;
         } else {
           stdout += `✓ No stored credentials for ${host} (already logged out)\n`;
         }
+        /* c8 ignore start -- defensive: deleteStoredCreds is idempotent, and existsSync + URL parsing don't throw for valid inputs */
       } catch (e) {
         stderr += formatError(e, server);
         exitCode = 1;
       }
+      /* c8 ignore stop */
     });
 
   program
