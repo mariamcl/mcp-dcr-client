@@ -27,7 +27,7 @@ describe('Client.connect (first time)', () => {
       clientName: 'test-client',
     });
     const tools = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(['add', 'echo']);
+    expect(tools.map((t) => t.name).sort()).toEqual(expect.arrayContaining(['add', 'echo']));
   });
 
   it('callTool invokes a tool and returns its result content', async () => {

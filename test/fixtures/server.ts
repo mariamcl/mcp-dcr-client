@@ -297,6 +297,19 @@ export async function startServer(opts: FixtureOptions = {}): Promise<FixtureSer
                 required: ['a', 'b'],
               },
             },
+            {
+              // tool with optional args, array type, description, and missing type
+              name: 'search',
+              description: 'Search for things',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  query: { type: 'string', description: 'The search query' },
+                  limit: { type: 'number' },
+                },
+                // no required → all optional
+              },
+            },
           ];
       res.json({ jsonrpc: '2.0', id, result: { tools: toolsList } });
       return;

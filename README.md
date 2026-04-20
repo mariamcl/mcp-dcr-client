@@ -15,8 +15,11 @@ npm run build
 # Authenticate against a real MCP server (Linear, etc.)
 ./bin/mcp-dcr-client login https://mcp.linear.app/sse
 ./bin/mcp-dcr-client tools https://mcp.linear.app/sse
+./bin/mcp-dcr-client describe https://mcp.linear.app/sse <tool>
 ./bin/mcp-dcr-client call https://mcp.linear.app/sse <tool> --arg=value
 ```
+
+`describe` pretty-prints the input schema for a single tool — required and optional parameters, their types, and descriptions — so you can see what arguments a tool accepts without reading the full `tools` output.
 
 ## Try it offline against the bundled fixture server
 

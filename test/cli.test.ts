@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, inject } from 'vitest';
 import { makeTempDir } from './helpers.js';
-import { runCli } from '../src/cli.js';
+import { runCli, formatToolSchema } from '../src/cli.js';
 import { saveStoredCreds, type StoredCreds } from '../src/tokens.js';
 import { startServer, type FixtureServer } from './fixtures/server.js';
 import { fileURLToPath } from 'node:url';
@@ -307,5 +307,141 @@ describe('CLI call with non-matching args', () => {
     );
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('hello');
+  });
+});
+
+describe('describe command', () => {
+  it('prints tool name, description, and required/optional args for echo', async () => {
+    await runCli(['login', `${baseUrl}/mcp`], { configDir, browserOpener: opener });
+    const result = await runCli(['describe', `${baseUrl}/mcp`, 'echo'], { configDir });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('echo');
+    expect(result.stdout).toMatch(/Echoes back/);
+    // The fixture's echo tool has required: text (string)
+    expect(result.stdout).toMatch(/text/);
+    expect(result.stdout).toMatch(/string/);
+  });
+
+  it('prints schema for add (two required numeric args)', async () => {
+    await runCli(['login', `${baseUrl}/mcp`], { configDir, browserOpener: opener });
+    const result = await runCli(['describe', `${baseUrl}/mcp`, 'add'], { configDir });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('add');
+    expect(result.stdout).toMatch(/a/);
+    expect(result.stdout).toMatch(/b/);
+    expect(result.stdout).toMatch(/number/);
+  });
+
+  it('errors when the tool does not exist', async () => {
+    await runCli(['login', `${baseUrl}/mcp`], { configDir, browserOpener: opener });
+    const result = await runCli(['describe', `${baseUrl}/mcp`, 'no-such-tool'], { configDir });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toMatch(/not found|unknown/i);
+  });
+
+  it('describe without login surfaces NoStoredCredentials error', async () => {
+    const result = await runCli(['describe', `${baseUrl}/mcp`, 'echo'], { configDir });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toMatch(/No stored credentials/);
+  });
+
+  it('prints Optional entries for a tool with only optional args', async () => {
+    await runCli(['login', `${baseUrl}/mcp`], { configDir, browserOpener: opener });
+    const result = await runCli(['describe', `${baseUrl}/mcp`, 'search'], { configDir });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('search');
+    expect(result.stdout).toMatch(/Required: \(none\)/);
+    expect(result.stdout).toMatch(/query/);
+    expect(result.stdout).toMatch(/The search query/);
+    expect(result.stdout).toMatch(/limit/);
+  });
+});
+
+describe('formatToolSchema unit tests', () => {
+  it('falls back when inputSchema is undefined', () => {
+    const out = formatToolSchema({ name: 'noop' });
+    expect(out).toContain('noop');
+    expect(out).toMatch(/no parameter schema available/);
+    // no raw JSON dump when schema is undefined
+    expect(out).not.toContain('{');
+  });
+
+  it('falls back and dumps JSON when inputSchema is non-object type', () => {
+    const out = formatToolSchema({ name: 'noop', inputSchema: { type: 'array' } });
+    expect(out).toMatch(/no parameter schema available/);
+    expect(out).toContain('"type": "array"');
+  });
+
+  it('falls back for object schema with no properties', () => {
+    const out = formatToolSchema({ name: 'ping', inputSchema: { type: 'object' } });
+    expect(out).toMatch(/no parameter schema available/);
+  });
+
+  it('handles array type for a property', () => {
+    const out = formatToolSchema({
+      name: 'foo',
+      inputSchema: {
+        type: 'object',
+        properties: { val: { type: ['string', 'null'], description: 'A value' } },
+        required: ['val'],
+      },
+    });
+    expect(out).toMatch(/string\|null/);
+    expect(out).toMatch(/A value/);
+  });
+
+  it('handles missing type for a property (prints "any")', () => {
+    const out = formatToolSchema({
+      name: 'foo',
+      inputSchema: {
+        type: 'object',
+        properties: { val: { description: 'no type here' } },
+      },
+    });
+    expect(out).toMatch(/any/);
+    expect(out).toMatch(/Required: \(none\)/);
+  });
+
+  it('prints optional entries without description', () => {
+    const out = formatToolSchema({
+      name: 'foo',
+      inputSchema: {
+        type: 'object',
+        properties: { x: { type: 'number' } },
+      },
+    });
+    expect(out).toMatch(/Optional:\n  x \(number\)\n/);
+  });
+
+  it('prints tool without description', () => {
+    const out = formatToolSchema({
+      name: 'bare',
+      inputSchema: { type: 'object', properties: { x: { type: 'string' } }, required: ['x'] },
+    });
+    expect(out).toMatch(/^bare\n/);
+  });
+
+  it('handles missing type for a required property (prints "any")', () => {
+    const out = formatToolSchema({
+      name: 'foo',
+      inputSchema: {
+        type: 'object',
+        properties: { val: { description: 'required but no type' } },
+        required: ['val'],
+      },
+    });
+    expect(out).toMatch(/Required:\n  val \(any\)/);
+  });
+
+  it('handles array type for an optional property', () => {
+    const out = formatToolSchema({
+      name: 'foo',
+      inputSchema: {
+        type: 'object',
+        properties: { val: { type: ['string', 'null'], description: 'optional array-type' } },
+      },
+    });
+    expect(out).toMatch(/string\|null/);
+    expect(out).toMatch(/optional array-type/);
   });
 });

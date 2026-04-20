@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { Client } from './client.js';
+import { Client, type ToolDescriptor } from './client.js';
 import { NoStoredCredentials } from './errors.js';
 
 export interface CliOptions {
@@ -102,6 +102,30 @@ export async function runCli(argv: string[], opts: CliOptions = {}): Promise<Cli
       }
     });
 
+  program
+    .command('describe <server> <tool>')
+    .description('Show the input schema for a specific tool')
+    .action(async (server: string, toolName: string) => {
+      try {
+        const client = await Client.connect(server, {
+          configDir: opts.configDir,
+          browserOpener: credRequiredOpener(server),
+        });
+        const tools = await client.listTools();
+        const tool = tools.find((t) => t.name === toolName);
+        if (!tool) {
+          stderr += `✗ Tool not found: ${toolName}\n`;
+          stderr += `  Available tools: ${tools.map((t) => t.name).join(', ')}\n`;
+          exitCode = 1;
+          return;
+        }
+        stdout += formatToolSchema(tool);
+      } catch (e) {
+        stderr += formatError(e, server);
+        exitCode = 1;
+      }
+    });
+
   try {
     await program.parseAsync(argv, { from: 'user' });
   } catch (e) {
@@ -154,6 +178,48 @@ function formatError(e: unknown, serverUrl: string): string {
     default:
       return `✗ ${err.name}: ${err.message}\n`;
   }
+}
+
+export function formatToolSchema(tool: ToolDescriptor): string {
+  let out = `${tool.name}${tool.description ? ` — ${tool.description}` : ''}\n`;
+  const schema = tool.inputSchema as
+    | {
+        type?: string;
+        properties?: Record<string, { type?: string | string[]; description?: string }>;
+        required?: string[];
+      }
+    | undefined;
+  if (!schema || schema.type !== 'object' || !schema.properties) {
+    out += '\n(no parameter schema available)\n';
+    if (schema) out += `\n${JSON.stringify(schema, null, 2)}\n`;
+    return out;
+  }
+  const required = new Set(schema.required ?? []);
+  const requiredEntries = Object.entries(schema.properties).filter(([k]) => required.has(k));
+  const optionalEntries = Object.entries(schema.properties).filter(([k]) => !required.has(k));
+  out += '\n';
+  if (requiredEntries.length > 0) {
+    out += 'Required:\n';
+    for (const [name, prop] of requiredEntries) {
+      const type = Array.isArray(prop.type) ? prop.type.join('|') : prop.type ?? 'any';
+      const desc = prop.description ? `  — ${prop.description}` : '';
+      out += `  ${name} (${type})${desc}\n`;
+    }
+  } else {
+    out += 'Required: (none)\n';
+  }
+  out += '\n';
+  if (optionalEntries.length > 0) {
+    out += 'Optional:\n';
+    for (const [name, prop] of optionalEntries) {
+      const type = Array.isArray(prop.type) ? prop.type.join('|') : prop.type ?? 'any';
+      const desc = prop.description ? `  — ${prop.description}` : '';
+      out += `  ${name} (${type})${desc}\n`;
+    }
+  } else {
+    out += 'Optional: (none)\n';
+  }
+  return out;
 }
 
 // Real-process entry point
