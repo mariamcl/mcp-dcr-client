@@ -18,13 +18,13 @@ It's also the right shape for **multi-tenant integrations**. Each user's tokens 
 
 ## What surprised me
 
-[YOU — fill in 2-3 things you didn't expect when building this. Examples to consider:
-- Two-stage discovery (RS metadata then AS metadata) isn't obvious from the spec on first read
-- Loopback URL must be registered dynamically per-port; otherwise the redirect_uri match fails
-- Linear's specific quirks (only fillable after T21 verification)
-- How the MCP SDK's auth helpers compared to hand-rolling
-- Anything about the LLM workflow that surprised you (good or bad)
-- Specific things you thought would be hard but weren't, or vice versa]
+**The loopback HTTP server pattern was new to me.** I hadn't realized the OAuth flow for native clients (anything that isn't a web app) requires the client itself to spin up a tiny local HTTP server *just* to catch the redirect from the browser. Two round trips to the authorization server — one through the user's browser to `/authorize`, one straight from the client to `/token` — instead of the single request/response I'd have sketched from scratch. And the client has to play two roles simultaneously: outbound HTTP requester *and* local HTTP server. Once you see why (the AS can't redirect a browser back to a CLI process without something to redirect *to*), it makes sense, but it's not the shape I'd have predicted.
+
+**Linear uses SSE transport, not the simple "POST JSON-RPC" shape I'd assumed.** My first attempt to call a tool against `mcp.linear.app/sse` returned 404 — the `/sse` path expects a GET to open an event stream, not a POST. Real-world MCP servers right now are mid-migration between SSE and the newer Streamable HTTP transport, and a naive client that hard-codes one or the other won't work universally. Switching to the official MCP SDK's transports (which handle both) was the fix.
+
+**Some OAuth providers only expose OIDC discovery (`/.well-known/openid-configuration`), not the OAuth-specific `/.well-known/oauth-authorization-server`.** The two documents are nearly identical for the fields we care about, so a robust client should fall back to the OIDC one. Mine doesn't yet — that's noted in the production gaps section.
+
+**The MCP SDK has a Client + transports but almost no auth glue.** I hand-rolled discovery, DCR, PKCE, the loopback callback server, and token storage because the SDK doesn't expose helpers for any of that yet — it stops at "give me an authenticated transport and I'll do JSON-RPC over it." Hand-rolling was actually fine for understanding the spec, but I'd expect more of this to move into the SDK as the auth spec stabilizes.
 
 ## Production gaps
 
@@ -40,9 +40,6 @@ What I'd add before shipping this for real:
 
 ## On using LLM-driven dev tools
 
-[YOU — write 1-2 paragraphs about the actual experience building this with Claude Code / Codex / similar. Honest take. Things to consider:
-- What the LLM workflow let you do faster
-- Where it surprised you (good or bad)
-- What you'd want to see improve
-- Whether the discipline of brainstorm → plan → execute (vs vibes coding) was worth it for this scope
-- Whether you'd reach for this approach for the next takehome / next project / production work]
+The pace was the biggest surprise — a project I'd budget a full weekend for came together in one focused session. What I found interesting was that I still found ways to improve the final product. A tool on the fixture server (`search`) had been wired into the `tools/list` response without a matching `tools/call` handler — easy to miss, obvious once I tried calling it. I added a `describe` CLI subcommand to print a tool's input schema, so I'd stop guessing arg names. I added stricter error handling on positional args.
+
+The shape that worked for me: I drove the solution and asked Claude to explain *what* it was doing — the auth dance, why the loopback exists, why SSE caused our 404 — at the moments I wanted to understand. I didn't have to sit there googling answers to my own questions; the explanations came in the same conversation as the work.
